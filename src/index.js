@@ -1,4 +1,4 @@
-const axios = require('axios')
+const axios = require('axios');
 
 /**
  * Default number of rows to be returned.
@@ -13,12 +13,12 @@ const PaginationSkip = 0;
 /**
  * Asceding direction of sorting.
  */
-const SortAscending = 'asc'
+const SortAscending = 'asc';
 
 /**
  * Descending direcion of sorting.
  */
-const SortDescending = 'desc'
+const SortDescending = 'desc';
 
 /**
  * Logical AND of Daktela filter.
@@ -41,8 +41,8 @@ const Pagination = function (take = PaginationTake, skip = PaginationSkip) {
     return {
         take: take,
         skip: skip
-    }
-}
+    };
+};
 
 /**
  * Builds Daktela's Sort object.
@@ -55,8 +55,8 @@ const Sort = function (field, dir) {
     return {
         field: field,
         dir: dir
-    }
-}
+    };
+};
 
 /**
  * Builds Daktela's simple filter.
@@ -71,8 +71,8 @@ const FilterSimple = function (field, operator, value) {
         field: field,
         operator: operator,
         value: value
-    }
-}
+    };
+};
 
 /**
  * A class representing Daktela response.
@@ -89,15 +89,15 @@ class DaktelaResponse {
         var body = response.data;
         this.status = response.status;
         const result = body.result ?? null;
-        this.data = result
+        this.data = result;
         if (result !== null && Array.isArray(result.data)) {
-            this.data = result.data
+            this.data = result.data;
         }
         if (result !== null && result.total !== null) {
-            this.total = result.total
+            this.total = result.total;
         }
     }
-  };
+};
 
 /**
  * A class representing Daktela error.
@@ -110,12 +110,12 @@ class DaktelaError extends Error {
      * @param {Error} prevError Original error thrown during request.
      */
     constructor(prevError) {
-        super(prevError.message)
+        super(prevError.message);
         this.name = 'DaktelaError';
         this.prevError = prevError;
         this.status = null;
         this.apiError = null;
-        if (prevError.response)  {
+        if (prevError.response) {
             this.status = prevError.response.status;
             if (prevError.response.data.error) {
                 this.apiError = prevError.response.data.error;
@@ -153,9 +153,9 @@ const DaktelaConnector = function DaktelaConnector(url, accessToken = null, opti
         baseURL: url + 'api/v6/',
         headers: headers,
         timeout: Number.isInteger(options.timeout) && options.timeout >= 0 ? options.timeout : 0
-    })
+    });
     this.accessToken = accessToken;
-}
+};
 
 /**
  * Checks whether given item is an object or not.
@@ -174,10 +174,10 @@ function isObject(item) {
  * @return {Object}
  */
 DaktelaConnector.prototype.buildRequestParams = function (options) {
-    let params = {}
+    let params = {};
     if (isObject(options)) {
         if (isObject(options.params)) {
-            params = options.params
+            params = options.params;
         } else {
             params = {};
             if (Array.isArray(options.fields)) {
@@ -194,7 +194,7 @@ DaktelaConnector.prototype.buildRequestParams = function (options) {
                 params.filter = {
                     logic: FilterLogicAnd,
                     filters: options.filters
-                }
+                };
             }
             if (isObject(options.filter)) {
                 if (isObject(params.filter)) {
@@ -210,8 +210,8 @@ DaktelaConnector.prototype.buildRequestParams = function (options) {
     }
     return {
         params: params
-    }
-}
+    };
+};
 
 /**
  * 
@@ -219,9 +219,10 @@ DaktelaConnector.prototype.buildRequestParams = function (options) {
  * @return 
  */
 DaktelaConnector.prototype.enrichWithAccessToken = function (params) {
-    return this.buildRequestParams({params: params});
-    
-}
+    return this.buildRequestParams({
+        params: params
+    });
+};
 
 /**
  * HTTP GET method.
@@ -244,7 +245,7 @@ DaktelaConnector.prototype.get = async function (endpoint, options = null) {
     } catch (error) {
         throw new DaktelaError(error);
     }
-}
+};
 
 /**
  * HTTP POST method.
@@ -262,7 +263,7 @@ DaktelaConnector.prototype.post = async function (endpoint, payload, params = nu
     } catch (error) {
         throw new DaktelaError(error);
     }
-}
+};
 
 /**
  * HTTP PUT method.
@@ -280,7 +281,7 @@ DaktelaConnector.prototype.put = async function (endpoint, payload, params = nul
     } catch (error) {
         throw new DaktelaError(error);
     }
-}
+};
 
 /**
  * HTTP DELETE method.
@@ -297,7 +298,7 @@ DaktelaConnector.prototype.delete = async function (endpoint, params = null) {
     } catch (error) {
         throw new DaktelaError(error);
     }
-}
+};
 
 module.exports = {
     DaktelaConnector,
@@ -312,4 +313,4 @@ module.exports = {
     FilterLogicAnd,
     FilterLogicOr,
     FilterSimple
-}
+};
