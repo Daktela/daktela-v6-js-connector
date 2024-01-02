@@ -1,0 +1,26 @@
+{
+  "name": "daktela-connector",
+  "version": "1.0.0",
+  "description": "Daktela's JavaScript SDK",
+  "main": "src/index.js",
+  "scripts": {
+    "test": "jest"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Daktela/daktela-v6-js-connector.git"
+  },
+  "author": "Martin Sach",
+  "license": "Apache-2.0",
+  "bugs": {
+    "url": "https://github.com/Daktela/daktela-v6-js-connector/issues"
+  },
+  "homepage": "https://github.com/Daktela/daktela-v6-js-connector#readme",
+  "dependencies": {
+    "axios": "^1.6.3"
+  },
+  "devDependencies": {
+    "dotenv": "^16.3.1",
+    "jest": "^29.7.0"
+  }
+}
