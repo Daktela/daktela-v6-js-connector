@@ -183,7 +183,7 @@ DaktelaConnector.prototype.buildRequestParams = function (options) {
             if (Array.isArray(options.fields)) {
                 params.fields = options.fields;
             }
-            if (Array.isArray(options.sort)) {
+            if (Array.isArray(options.sort) || isObject(options.sort)) {
                 params.sort = options.sort;
             }
             if (isObject(options.pagination)) {
@@ -227,14 +227,14 @@ DaktelaConnector.prototype.enrichWithAccessToken = function (params) {
 /**
  * HTTP GET method.
  *
- * @param {string}           endpoint            Target endpoint (e.g. 'activities' or 'activities/activity_xxx').
- * @param {Object}           [options=null]      Options of the request. See below.
- * @param {Object}           options.params      Params of the Axios library. Useful to directly pass query params to the request. This value overrides all other options (i.e.: pagination, filter, sort).
- * @param {Array<string>}    options.fields      List of fields to be returned in response.
- * @param {Array<object>}    options.sort        List of Daktela's sorts. Use @function Sort to build single sort.
- * @param {object}           options.pagination  Pagination of the request. Use @function Pagination to build Daktela pagignation.
- * @param {Array<object>}    options.filters     List of simple filters (i.e. filters merged by AND condition). Use @see SimpleFilter to build simple Daktela filter. In one request use either simple filters or custom filtering object - not both of them.
- * @param {object}           options.filter      Object containing custom filter. In one request use either simple filters or custom filtering object - not both of them.
+ * @param {string}                  endpoint            Target endpoint (e.g. 'activities' or 'activities/activity_xxx').
+ * @param {Object}                  [options=null]      Options of the request. See below.
+ * @param {Object}                  options.params      Params of the Axios library. Useful to directly pass query params to the request. This value overrides all other options (i.e.: pagination, filter, sort).
+ * @param {Array<string>}           options.fields      List of fields to be returned in response.
+ * @param {Array<Object>|Object}    options.sort        List of Daktela's sorts. Use @function Sort to build single sort.
+ * @param {Object}                  options.pagination  Pagination of the request. Use @function Pagination to build Daktela pagignation.
+ * @param {Array<Object>}           options.filters     List of simple filters (i.e. filters merged by AND condition). Use @see SimpleFilter to build simple Daktela filter. You can combine list of simple filters and custom filter object in one request.
+ * @param {Object}                  options.filter      Object containing custom filter. You can combine list of simple filters and custom filter object in one request.
  * @throws {DaktelaError}
  * @return {Promise<DaktelaResponse>}
  */

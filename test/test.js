@@ -125,8 +125,10 @@ test('Build params test', () => {
     const daktela2 = new Daktela.DaktelaConnector(process.env.INSTANCE, process.env.ACCESS_TOKEN, {
         cookieAuth: false
     });
-    params = daktela2.buildRequestParams();
+    params = daktela2.buildRequestParams({sort: Daktela.Sort('created', Daktela.SortAscending)});
     expect(params.params.accessToken).toBe(process.env.ACCESS_TOKEN);
+    expect(params.params.sort.field).toBe('created');
+    expect(params.params.sort.dir).toBe(Daktela.SortAscending);
 });
 
 test('Initial request test', async () => {
@@ -200,4 +202,16 @@ describe('CRUD test', () => {
         expect(r.status).toBe(204);
         expect(r.data).toBe(null);
     });
+});
+
+test('Filter tickets from README', async () => {
+    const take = 3;
+    const r = await daktela.get('tickets', {
+        pagination: Daktela.Pagination(take),
+        fields: ['name', 'title', 'category', 'user'],
+        sort: Daktela.Sort('edited', Daktela.SortDescending),
+        filters: [Daktela.FilterSimple('stage', 'eq', 'OPEN')]
+    });
+    expect(r.status).toBe(200);
+    expect(r.data.length).toBe(take);
 });
