@@ -16,7 +16,11 @@ The only dependency of this library is HTTP client `Axios` (https://axios-http.c
 `DaktelaConnector` is a class that allows you to send CRUD requests on your Daktela server.
 Beside `instance` and `accessToken` you can pass `options` object with following parameters:
 
-* `cookieAuth` (boolean) - whether authorize requests via Cookie header or via query parameters. Default value is authorization via cookies.
+* `authMethod` (string) - authentication method. Possible values:
+  * `'header'` (default) - uses `X-AUTH-TOKEN` HTTP header.
+  * `'cookie'` - uses `Cookie` header with `c_user` cookie.
+  * `'query'` - passes access token as query parameter.
+* `cookieAuth` (boolean) - **deprecated**, use `authMethod` instead. When set to `true`, uses cookie authentication; when `false`, uses query parameter authentication.
 * `userAgent` (string) - HTTP User-Agent header.
 * `timeout` {number} - requests' timeout. Default value is `0` (no timeout).
 
@@ -40,7 +44,14 @@ Other way is to directly pass Axios's `params` argument which overrides Daktela 
 ```js
 require('dotenv').config();
 const Daktela = require('daktela-connector');
+
+// Default - uses X-AUTH-TOKEN header
 let daktela = new Daktela.DaktelaConnector(process.env.INSTANCE, process.env.ACCESS_TOKEN);
+
+// Or explicitly specify authentication method
+let daktela = new Daktela.DaktelaConnector(process.env.INSTANCE, process.env.ACCESS_TOKEN, {
+    authMethod: 'cookie'  // 'header' (default), 'cookie', or 'query'
+});
 
 //...
 

@@ -130,7 +130,8 @@ class DaktelaError extends Error {
  * @param {string}  url                 Target Daktela instance (e. g. my.daktela.com).
  * @param {string}  [accessToken=null]  Access token.
  * @param {Object}  [options={}]        Options of the connector. See below.
- * @param {boolean} options.cookieAuth  Authorize requests via Cookie header. Default value is true. Otherwise access token will be passed as query parameter.
+ * @param {string}  options.authMethod  Authentication method: 'header' (X-AUTH-TOKEN, default), 'cookie' (Cookie header), or 'query' (query parameter).
+ * @param {boolean} options.cookieAuth  @deprecated Use authMethod instead. Authorize requests via Cookie header. Default value is true. Otherwise access token will be passed as query parameter.
  * @param {string}  options.userAgent   User agent header.
  * @param {number}  options.timeout     Specifies the number of milliseconds before the request times out. Default is 0 (no timout)
  */
@@ -141,10 +142,20 @@ const DaktelaConnector = function DaktelaConnector(url, accessToken = null, opti
     if (!url.endsWith('/')) {
         url += '/';
     }
-    this.cookieAuth = options.cookieAuth ?? true;
+    // Determine auth method: 'header' (default), 'cookie', or 'query'
+    this.authMethod = options.authMethod ?? 'header';
+    // Backward compatibility: if cookieAuth is explicitly set, use legacy behavior
+    if (options.cookieAuth !== undefined) {
+        this.authMethod = options.cookieAuth ? 'cookie' : 'query';
+    }
     var headers = {};
-    if (this.cookieAuth && accessToken != null) {
-        headers['Cookie'] = 'c_user=' + accessToken;
+    if (accessToken != null) {
+        if (this.authMethod === 'header') {
+            headers['X-AUTH-TOKEN'] = accessToken;
+        } else if (this.authMethod === 'cookie') {
+            headers['Cookie'] = 'c_user=' + accessToken;
+        }
+        // 'query' method handled in buildRequestParams()
     }
     if (options.userAgent !== null) {
         headers['User-Agent'] = options.userAgent;
@@ -205,7 +216,7 @@ DaktelaConnector.prototype.buildRequestParams = function (options) {
             }
         }
     }
-    if (!this.cookieAuth && this.accessToken !== null) {
+    if (this.authMethod === 'query' && this.accessToken !== null) {
         params.accessToken = this.accessToken;
     }
     return {
