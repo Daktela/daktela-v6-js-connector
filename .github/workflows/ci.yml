@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - master
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Node.js ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node:
+          - 18
+          - 20
+          - 22
+          - 24
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install and test in Docker
+        run: >-
+          docker run --rm
+          --volume "$GITHUB_WORKSPACE:/app"
+          --workdir /app
+          --env CI=true
+          node:${{ matrix.node }}-alpine
+          sh -c "npm ci && npm test && npm run test:types"
+
+  coverage:
+    name: Coverage
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Generate coverage in Docker
+        run: >-
+          docker run --rm
+          --volume "$GITHUB_WORKSPACE:/app"
+          --workdir /app
+          --env CI=true
+          node:22-alpine
+          sh -c "npm ci && npm run test:coverage"
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage/
+          if-no-files-found: error

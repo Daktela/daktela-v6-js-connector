@@ -1,11 +1,45 @@
 {
   "name": "@daktela/daktela-connector",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Daktela's JavaScript SDK",
   "keywords": ["daktela", "omnichannel", "contact center", "communication"],
   "main": "src/index.js",
+  "types": "index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "require": "./src/index.js",
+      "default": "./src/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "src/",
+    "index.d.ts",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
-    "test": "jest"
+    "test": "jest --runInBand --testPathIgnorePatterns=integration.test.js",
+    "test:coverage": "jest --runInBand --testPathIgnorePatterns=integration.test.js --coverage",
+    "test:integration": "jest --runInBand test/integration.test.js",
+    "test:types": "tsc --noEmit -p test/types/tsconfig.json"
+  },
+  "jest": {
+    "coverageThreshold": {
+      "global": {
+        "branches": 80,
+        "functions": 90,
+        "lines": 90,
+        "statements": 90
+      }
+    }
   },
   "repository": {
     "type": "git",
@@ -18,11 +52,12 @@
   },
   "homepage": "https://github.com/Daktela/daktela-v6-js-connector#readme",
   "dependencies": {
-    "axios": "^1.6.3"
+    "axios": "^1.19.0"
   },
   "devDependencies": {
     "dotenv": "^16.3.1",
-    "jest": "^29.7.0"
+    "jest": "^29.7.0",
+    "typescript": "^7.0.2"
   },
   "directories": {
     "test": "test"
