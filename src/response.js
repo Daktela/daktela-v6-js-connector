@@ -19,6 +19,60 @@ function normalizeErrors(error) {
     return Array.isArray(error) ? error : [error];
 }
 
+const REDACTED = '[REDACTED]';
+const SENSITIVE_HEADERS = new Set(['x-auth-token', 'cookie', 'authorization']);
+const SENSITIVE_PARAMS = new Set(['accesstoken']);
+const MAX_ERROR_SUMMARY_LENGTH = 500;
+
+function redactEntries(target, names) {
+    if (target === null || typeof target !== 'object') {
+        return;
+    }
+    for (const key of Object.keys(target)) {
+        if (names.has(key.toLowerCase()) && target[key] != null) {
+            target[key] = REDACTED;
+        }
+    }
+}
+
+function hideProperty(target, name) {
+    if (target === null || typeof target !== 'object'
+        || !Object.prototype.hasOwnProperty.call(target, name)) {
+        return;
+    }
+    const descriptor = Object.getOwnPropertyDescriptor(target, name);
+    if (descriptor.configurable) {
+        Object.defineProperty(target, name, {...descriptor, enumerable: false});
+    }
+}
+
+// Axios errors carry the full request config and the raw client request, both of
+// which contain the access token. Redact them in place so logging or serializing
+// a DaktelaError (or its cause) never discloses credentials.
+function redactCredentials(error) {
+    if (error === null || typeof error !== 'object') {
+        return;
+    }
+    for (const config of [error.config, error.response?.config]) {
+        if (config !== null && typeof config === 'object') {
+            redactEntries(config.headers, SENSITIVE_HEADERS);
+            redactEntries(config.params, SENSITIVE_PARAMS);
+        }
+    }
+    hideProperty(error, 'request');
+    hideProperty(error.response, 'request');
+}
+
+function summarizeErrors(errors) {
+    const summary = errors
+        .map((error) => (typeof error === 'string' ? error : JSON.stringify(error)))
+        .filter((text) => typeof text === 'string' && text !== '')
+        .join('; ');
+    return summary.length > MAX_ERROR_SUMMARY_LENGTH
+        ? `${summary.slice(0, MAX_ERROR_SUMMARY_LENGTH)}…`
+        : summary;
+}
+
 function parseRetryAfter(value, now = Date.now()) {
     if (value === null || value === undefined || value === '') {
         return null;
@@ -87,15 +141,19 @@ class DaktelaResponse {
 
 class DaktelaError extends Error {
     constructor(prevError) {
-        const message = prevError?.message ?? 'Daktela request failed';
-        super(message);
+        redactCredentials(prevError);
+        const apiError = prevError?.response?.data?.error ?? null;
+        const errors = normalizeErrors(apiError);
+        const baseMessage = prevError?.message ?? 'Daktela request failed';
+        const summary = summarizeErrors(errors);
+        super(summary === '' ? baseMessage : `${baseMessage}: ${summary}`);
         this.name = 'DaktelaError';
         this.prevError = prevError;
         this.cause = prevError;
         this.status = prevError?.response?.status ?? null;
         this.code = prevError?.code ?? null;
-        this.apiError = prevError?.response?.data?.error ?? null;
-        this.errors = normalizeErrors(this.apiError);
+        this.apiError = apiError;
+        this.errors = errors;
         this.headers = prevError?.response?.headers ?? {};
         this.retryAfter = parseRetryAfter(getHeader(this.headers, 'retry-after'));
         this.isRateLimit = this.status === 429;
@@ -112,5 +170,6 @@ module.exports = {
     DaktelaError,
     getHeader,
     normalizeErrors,
-    parseRetryAfter
+    parseRetryAfter,
+    redactCredentials
 };

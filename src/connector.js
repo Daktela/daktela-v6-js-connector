@@ -16,14 +16,20 @@ const {
 } = require('./response');
 
 const AUTH_METHODS = new Set(['header', 'cookie', 'query']);
+const AUTH_HEADER_PATTERN = /^(?:x-auth-token|cookie|authorization)$/i;
+const DEFAULT_TIMEOUT_MS = 60000;
+const DEFAULT_MAX_PAGES = 999;
+const DEFAULT_MAX_CONSECUTIVE_ERRORS = 3;
 const DEFAULT_RETRY_STATUS_CODES = [408, 425, 500, 502, 503, 504];
 const DEFAULT_RETRY_METHODS = ['get', 'head', 'options', 'delete'];
 const PAGINATION_OPTION_KEYS = new Set([
     'pageSize',
     'maxItems',
     'maxPages',
-    'stopOnError'
+    'stopOnError',
+    'maxConsecutiveErrors'
 ]);
+const QUERY_HELPER_KEYS = ['fields', 'sort', 'pagination', 'filters', 'filter'];
 
 function normalizeUrl(url) {
     if (typeof url !== 'string' || url.trim() === '') {
@@ -50,6 +56,66 @@ function normalizeUrl(url) {
     }
 
     return parsed.toString().replace(/\/+$/, '');
+}
+
+function validateAccessToken(accessToken, authMethod) {
+    if (accessToken == null) {
+        return;
+    }
+    if (typeof accessToken !== 'string' || accessToken === '') {
+        throw new TypeError('Access token must be a non-empty string, null, or undefined');
+    }
+    if (/[\u0000-\u001f\u007f]/.test(accessToken)) {
+        throw new TypeError('Access token must not contain control characters');
+    }
+    if (authMethod === 'cookie' && /[\s;,]/.test(accessToken)) {
+        throw new TypeError('Access token used for cookie authentication must not contain whitespace, commas, or semicolons');
+    }
+}
+
+function normalizeTimeout(value) {
+    if (value === undefined) {
+        return DEFAULT_TIMEOUT_MS;
+    }
+    if (!Number.isInteger(value) || value < 0) {
+        throw new TypeError('timeout must be a non-negative integer number of milliseconds (0 disables it)');
+    }
+    return value;
+}
+
+function originOf(options) {
+    try {
+        if (typeof options.href === 'string') {
+            return new URL(options.href).origin;
+        }
+        const host = options.hostname ?? options.host;
+        const port = options.port ? `:${options.port}` : '';
+        return new URL(`${options.protocol}//${host}${port}`).origin;
+    } catch (_error) {
+        return null;
+    }
+}
+
+function removeAuthHeaders(headers) {
+    if (headers === null || typeof headers !== 'object') {
+        return;
+    }
+    for (const name of Object.keys(headers)) {
+        if (AUTH_HEADER_PATTERN.test(name)) {
+            delete headers[name];
+        }
+    }
+}
+
+function applicationError(response, message = 'Daktela API returned application errors') {
+    const error = new Error(message);
+    error.code = 'ERR_DAKTELA_APPLICATION';
+    error.response = {
+        status: response.status,
+        headers: response.headers,
+        data: {error: response.errors}
+    };
+    return new DaktelaError(error);
 }
 
 function positiveNumber(value, defaultValue, name, allowZero = false) {
@@ -211,6 +277,8 @@ class DaktelaConnector {
         if (!AUTH_METHODS.has(this.authMethod)) {
             throw new TypeError("authMethod must be 'header', 'cookie', or 'query'");
         }
+        validateAccessToken(accessToken, this.authMethod);
+        this.origin = new URL(this.baseUrl).origin;
 
         this.retryConfig = normalizeRetryConfig(options.retry);
         this.rateLimitConfig = normalizeRateLimitConfig(options.rateLimit);
@@ -236,9 +304,7 @@ class DaktelaConnector {
             this.requestHeaders['User-Agent'] = headers['User-Agent'];
         }
 
-        const timeout = Number.isInteger(options.timeout) && options.timeout >= 0
-            ? options.timeout
-            : 0;
+        const timeout = normalizeTimeout(options.timeout);
         const axiosConfig = isObject(options.axiosConfig) ? {...options.axiosConfig} : {};
         delete axiosConfig.baseURL;
         delete axiosConfig.headers;
@@ -263,6 +329,12 @@ class DaktelaConnector {
         if (isObject(options)) {
             if (isObject(options.params)) {
                 params = {...options.params};
+                const ignored = QUERY_HELPER_KEYS.filter((key) => options[key] != null);
+                if (ignored.length > 0) {
+                    this.log('warn', 'Query helper options are ignored when params is supplied', {
+                        ignored
+                    });
+                }
             } else {
                 if (Array.isArray(options.fields)) {
                     params.fields = options.fields.slice();
@@ -320,6 +392,15 @@ class DaktelaConnector {
         requestConfig.params = this.buildRequestParams(options).params;
         requestConfig.baseURL = this.baseUrl;
         requestConfig.allowAbsoluteUrls = false;
+        requestConfig.beforeRedirect = this.redirectGuard(
+            requestConfig.beforeRedirect ?? this.api?.defaults?.beforeRedirect
+        );
+        // The fetch adapter does not support beforeRedirect, so refuse redirects there.
+        requestConfig.fetchOptions = {
+            ...(this.api?.defaults?.fetchOptions ?? {}),
+            ...(requestConfig.fetchOptions ?? {}),
+            redirect: 'error'
+        };
         if (requestConfig.timeout === undefined) {
             requestConfig.timeout = this.timeout;
         }
@@ -392,7 +473,7 @@ class DaktelaConnector {
                 }
 
                 if (this.shouldRetry(error, normalizedMethod, retryConfig, retries)) {
-                    const waitMs = this.retryDelay(retryConfig, retries);
+                    const waitMs = this.retryDelay(retryConfig, retries, error);
                     retries++;
                     this.log('warn', 'Retrying Daktela API request', {
                         endpoint: normalizedEndpoint,
@@ -415,6 +496,20 @@ class DaktelaConnector {
         }
     }
 
+    redirectGuard(userBeforeRedirect) {
+        return (options, responseDetails, ...rest) => {
+            if (originOf(options) !== this.origin) {
+                removeAuthHeaders(options.headers);
+                this.log('warn', 'Removed Daktela credentials from a cross-origin redirect', {
+                    origin: originOf(options)
+                });
+            }
+            if (typeof userBeforeRedirect === 'function') {
+                userBeforeRedirect(options, responseDetails, ...rest);
+            }
+        };
+    }
+
     shouldRetry(error, method, config, retries) {
         if (retries >= config.retries || !config.methods.includes(method)) {
             return false;
@@ -425,12 +520,17 @@ class DaktelaConnector {
         return config.retryOnConnectionError && error?.code !== 'ERR_CANCELED';
     }
 
-    retryDelay(config, attempt) {
+    retryDelay(config, attempt, error = null) {
         const base = Math.min(
             config.maxDelayMs,
             config.baseDelayMs * Math.pow(config.multiplier, attempt)
         );
-        return config.jitter ? Math.floor(Math.random() * (base + 1)) : base;
+        const backoff = config.jitter ? Math.floor(Math.random() * (base + 1)) : base;
+        const retryAfter = parseRetryAfter(getHeader(error?.response?.headers, 'retry-after'));
+        if (retryAfter === null) {
+            return backoff;
+        }
+        return Math.max(backoff, Math.min(retryAfter * 1000, config.maxDelayMs));
     }
 
     async wait(waitMs, signal, originalError) {
@@ -513,8 +613,11 @@ class DaktelaConnector {
             throw new TypeError('Pagination options must be an object');
         }
         const pageSize = options.pageSize ?? options.pagination?.take ?? PaginationTake;
-        const maxPages = options.maxPages ?? 999;
+        const explicitMaxPages = options.maxPages !== undefined && options.maxPages !== null;
+        const maxPages = explicitMaxPages ? options.maxPages : DEFAULT_MAX_PAGES;
         const stopOnError = options.stopOnError ?? true;
+        const maxConsecutiveErrors = options.maxConsecutiveErrors
+            ?? DEFAULT_MAX_CONSECUTIVE_ERRORS;
         let skip = options.pagination?.skip ?? PaginationSkip;
 
         if (!Number.isInteger(pageSize) || pageSize <= 0) {
@@ -523,22 +626,27 @@ class DaktelaConnector {
         if (!Number.isInteger(maxPages) || maxPages <= 0) {
             throw new TypeError('maxPages must be a positive integer');
         }
+        if (!Number.isInteger(maxConsecutiveErrors) || maxConsecutiveErrors <= 0) {
+            throw new TypeError('maxConsecutiveErrors must be a positive integer');
+        }
 
         const baseOptions = withoutPaginationOptions(options);
+        let consecutiveErrors = 0;
         for (let page = 0; page < maxPages; page++) {
-            const pageOptions = {
-                ...baseOptions,
-                pagination: {take: pageSize, skip}
-            };
+            const pageOptions = {...baseOptions};
             if (isObject(baseOptions.params)) {
+                delete pageOptions.pagination;
                 pageOptions.params = {...baseOptions.params, take: pageSize, skip};
+            } else {
+                pageOptions.pagination = {take: pageSize, skip};
             }
 
             let response;
             try {
                 response = await this.get(endpoint, pageOptions);
             } catch (error) {
-                if (stopOnError) {
+                consecutiveErrors++;
+                if (stopOnError || consecutiveErrors >= maxConsecutiveErrors) {
                     throw error;
                 }
                 skip += pageSize;
@@ -550,9 +658,17 @@ class DaktelaConnector {
                 if (stopOnError) {
                     return;
                 }
+                consecutiveErrors++;
+                if (consecutiveErrors >= maxConsecutiveErrors) {
+                    throw applicationError(
+                        response,
+                        `Pagination aborted after ${consecutiveErrors} consecutive failed pages`
+                    );
+                }
                 skip += pageSize;
                 continue;
             }
+            consecutiveErrors = 0;
 
             if (!Array.isArray(response.data)
                 || response.data.length < pageSize
@@ -561,6 +677,17 @@ class DaktelaConnector {
                 return;
             }
             skip += pageSize;
+        }
+
+        // An explicit maxPages is an intentional cap. Hitting the default safety
+        // bound means data remains, so fail loudly instead of truncating silently.
+        if (!explicitMaxPages) {
+            const error = new Error(
+                `Pagination reached the default safety limit of ${DEFAULT_MAX_PAGES} pages `
+                + 'before the end of the data; set maxPages or maxItems explicitly'
+            );
+            error.code = 'ERR_PAGINATION_LIMIT';
+            throw new DaktelaError(error);
         }
     }
 
@@ -575,10 +702,17 @@ class DaktelaConnector {
         if (maxItems === 0) {
             return;
         }
+        const stopOnError = options.stopOnError ?? true;
 
         let count = 0;
         for await (const response of this.pages(endpoint, options)) {
-            if (response.hasErrors() || !Array.isArray(response.data)) {
+            if (response.hasErrors()) {
+                if (stopOnError) {
+                    throw applicationError(response);
+                }
+                continue;
+            }
+            if (!Array.isArray(response.data)) {
                 continue;
             }
             for (const item of response.data) {
@@ -596,6 +730,7 @@ class DaktelaConnector {
             throw new TypeError('Pagination options must be an object');
         }
         const data = [];
+        const errors = [];
         let lastResponse = null;
         const maxItems = options.maxItems ?? null;
         if (maxItems !== null && (!Number.isInteger(maxItems) || maxItems < 0)) {
@@ -610,7 +745,11 @@ class DaktelaConnector {
 
         for await (const response of this.pages(endpoint, options)) {
             lastResponse = response;
-            if (response.hasErrors() || !Array.isArray(response.data)) {
+            if (response.hasErrors()) {
+                errors.push(...response.errors);
+                continue;
+            }
+            if (!Array.isArray(response.data)) {
                 continue;
             }
             for (const item of response.data) {
@@ -632,7 +771,7 @@ class DaktelaConnector {
                     data,
                     total: lastResponse?.total ?? data.length
                 },
-                error: lastResponse?.errors ?? []
+                error: errors
             }
         });
     }

@@ -1,6 +1,9 @@
 'use strict';
 
+const http = require('http');
+const util = require('util');
 const Daktela = require('..');
+const {version} = require('../package.json');
 
 function apiResponse(result, status = 200, headers = {}, error = undefined) {
     return {
@@ -94,7 +97,7 @@ describe('connector configuration', () => {
         const client = new Daktela.DaktelaConnector('example.test', 'token');
         expect(client.api.defaults.headers['X-AUTH-TOKEN']).toBe('token');
         expect(client.api.defaults.headers['User-Agent']).toBe(
-            '@daktela/daktela-connector/1.2.0'
+            `@daktela/daktela-connector/${version}`
         );
     });
 
@@ -135,7 +138,7 @@ describe('connector configuration', () => {
             axiosConfig: {maxContentLength: 1024}
         });
         expect(client.api.defaults.headers['User-Agent']).toBe(
-            '@daktela/daktela-connector/1.2.0 CRM-Sync/2.0'
+            `@daktela/daktela-connector/${version} CRM-Sync/2.0`
         );
         expect(client.api.defaults.timeout).toBe(2500);
         expect(client.api.defaults.maxContentLength).toBe(1024);
@@ -306,7 +309,7 @@ describe('request pipeline', () => {
             headers: expect.objectContaining({
                 'X-AUTH-TOKEN': 'secret-token',
                 'X-Trace-ID': 'trace',
-                'User-Agent': '@daktela/daktela-connector/1.2.0'
+                'User-Agent': `@daktela/daktela-connector/${version}`
             })
         }));
     });
@@ -574,5 +577,206 @@ describe('health and pagination', () => {
     ])('validates pagination option %p', async (options, message) => {
         const client = connectorWith(fakeAxios(apiResponse({data: []})));
         await expect(collect(client.iterate('tickets', options))).rejects.toThrow(message);
+    });
+});
+
+describe('hardening', () => {
+    function listen(handler) {
+        return new Promise((resolve) => {
+            const server = http.createServer(handler);
+            server.listen(0, '127.0.0.1', () => resolve(server));
+        });
+    }
+
+    function close(server) {
+        return new Promise((resolve) => server.close(resolve));
+    }
+
+    test('strips credentials from cross-origin redirects but keeps same-origin ones', async () => {
+        const received = [];
+        const other = await listen((req, res) => {
+            received.push({target: 'other', token: req.headers['x-auth-token'] ?? null});
+            res.setHeader('content-type', 'application/json');
+            res.end('{"result":{}}');
+        });
+        const instance = await listen((req, res) => {
+            if (req.url.startsWith('/api/v6/away')) {
+                res.writeHead(302, {Location: `http://127.0.0.1:${other.address().port}/x`});
+                return res.end();
+            }
+            if (req.url.startsWith('/api/v6/home')) {
+                res.writeHead(302, {Location: '/api/v6/landed'});
+                return res.end();
+            }
+            received.push({target: 'instance', token: req.headers['x-auth-token'] ?? null});
+            res.setHeader('content-type', 'application/json');
+            return res.end('{"result":{}}');
+        });
+        try {
+            const client = new Daktela.DaktelaConnector(
+                `http://127.0.0.1:${instance.address().port}`,
+                'secret-token'
+            );
+            await client.get('away');
+            await client.get('home');
+            expect(received).toEqual([
+                {target: 'other', token: null},
+                {target: 'instance', token: 'secret-token'}
+            ]);
+        } finally {
+            await close(other);
+            await close(instance);
+        }
+    });
+
+    test.each(['header', 'query'])(
+        'never discloses the %s token when an error is serialized or inspected',
+        async (authMethod) => {
+            const server = await listen((req, res) => {
+                res.writeHead(400, {'content-type': 'application/json'});
+                res.end('{"error":["Ticket title is required"]}');
+            });
+            try {
+                const client = new Daktela.DaktelaConnector(
+                    `http://127.0.0.1:${server.address().port}`,
+                    'secret-token',
+                    {authMethod}
+                );
+                const error = await client.get('tickets').catch((caught) => caught);
+
+                expect(error).toBeInstanceOf(Daktela.DaktelaError);
+                expect(error.message).toBe(
+                    'Request failed with status code 400: Ticket title is required'
+                );
+                expect(JSON.stringify(error)).not.toContain('secret-token');
+                expect(util.inspect(error, {depth: 8})).not.toContain('secret-token');
+                expect(error.cause.request).toBeDefined();
+            } finally {
+                await close(server);
+            }
+        }
+    );
+
+    test('applies a default timeout and rejects invalid timeouts', () => {
+        expect(new Daktela.DaktelaConnector('example.test').timeout).toBe(60000);
+        expect(new Daktela.DaktelaConnector('example.test', null, {timeout: 0}).timeout).toBe(0);
+        expect(() => new Daktela.DaktelaConnector('example.test', null, {
+            timeout: '5000'
+        })).toThrow('timeout');
+        expect(() => new Daktela.DaktelaConnector('example.test', null, {
+            timeout: -1
+        })).toThrow('timeout');
+    });
+
+    test('rejects malformed access tokens', () => {
+        expect(() => new Daktela.DaktelaConnector('example.test', 123)).toThrow('Access token');
+        expect(() => new Daktela.DaktelaConnector('example.test', 'a\r\nb')).toThrow(
+            'control characters'
+        );
+        expect(() => new Daktela.DaktelaConnector('example.test', 'a; admin=1', {
+            authMethod: 'cookie'
+        })).toThrow('cookie');
+    });
+
+    test('warns when query helpers are ignored because params is supplied', () => {
+        const logger = {warn: jest.fn()};
+        const client = connectorWith(fakeAxios(apiResponse({})), {logger});
+        client.buildRequestParams({params: {take: 5}, fields: ['name']});
+        client.buildRequestParams({params: {take: 5}});
+
+        expect(logger.warn).toHaveBeenCalledTimes(1);
+        expect(logger.warn).toHaveBeenCalledWith(
+            'Query helper options are ignored when params is supplied',
+            {ignored: ['fields']}
+        );
+    });
+
+    test('honours Retry-After on retried responses within maxDelayMs', () => {
+        const client = connectorWith(fakeAxios(apiResponse({})));
+        const config = {baseDelayMs: 10, maxDelayMs: 5000, multiplier: 2, jitter: false};
+        const unavailable = requestError('busy', 503, undefined, {'retry-after': '2'});
+        const tooLong = requestError('busy', 503, undefined, {'retry-after': '60'});
+
+        expect(client.retryDelay(config, 0, unavailable)).toBe(2000);
+        expect(client.retryDelay(config, 0, tooLong)).toBe(5000);
+        expect(client.retryDelay(config, 0)).toBe(10);
+    });
+
+    test('throws instead of silently truncating at the default page limit', async () => {
+        const http = fakeAxios(apiResponse({data: [{id: 1}], total: 5000}));
+        const client = connectorWith(http);
+
+        await expect(collect(client.iterate('tickets', {pageSize: 1}))).rejects.toMatchObject({
+            code: 'ERR_PAGINATION_LIMIT'
+        });
+        expect(http.request).toHaveBeenCalledTimes(999);
+        await expect(client.getAll('tickets', {pageSize: 1})).rejects.toMatchObject({
+            code: 'ERR_PAGINATION_LIMIT'
+        });
+    });
+
+    test('an explicit maxPages caps pagination quietly', async () => {
+        const http = fakeAxios(apiResponse({data: [{id: 1}], total: 5000}));
+        const client = connectorWith(http);
+
+        await expect(collect(client.iterate('tickets', {
+            pageSize: 1,
+            maxPages: 3
+        }))).resolves.toHaveLength(3);
+    });
+
+    test('aborts after repeated failures when skipping failed pages', async () => {
+        const http = fakeAxios(requestError('unauthorized', 401, {error: ['denied']}));
+        const client = connectorWith(http);
+
+        await expect(collect(client.pages('tickets', {stopOnError: false}))).rejects.toMatchObject({
+            status: 401
+        });
+        expect(http.request).toHaveBeenCalledTimes(3);
+
+        const appErrors = fakeAxios(apiResponse(null, 200, {}, ['broken']));
+        const appClient = connectorWith(appErrors);
+        await expect(collect(appClient.pages('tickets', {
+            stopOnError: false,
+            maxConsecutiveErrors: 2
+        }))).rejects.toThrow('2 consecutive failed pages');
+        expect(appErrors.request).toHaveBeenCalledTimes(2);
+    });
+
+    test('iterate() surfaces application errors instead of ending silently', async () => {
+        const http = fakeAxios(
+            apiResponse({data: [{id: 1}], total: 3}),
+            apiResponse(null, 200, {}, ['database unavailable'])
+        );
+        const client = connectorWith(http);
+        const seen = [];
+
+        await expect((async () => {
+            for await (const item of client.iterate('tickets', {pageSize: 1})) {
+                seen.push(item);
+            }
+        })()).rejects.toThrow('database unavailable');
+        expect(seen).toEqual([{id: 1}]);
+    });
+
+    test('getAll() keeps application errors from every skipped page', async () => {
+        const http = fakeAxios(
+            apiResponse(null, 200, {}, ['first']),
+            apiResponse({data: [{id: 1}], total: 3}),
+            apiResponse(null, 200, {}, ['second']),
+            apiResponse({data: [], total: 3})
+        );
+        const client = connectorWith(http);
+        const response = await client.getAll('tickets', {pageSize: 1, stopOnError: false});
+
+        expect(response.data).toEqual([{id: 1}]);
+        expect(response.errors).toEqual(['first', 'second']);
+    });
+
+    test.each([
+        [{maxConsecutiveErrors: 0}, 'maxConsecutiveErrors']
+    ])('validates pagination option %p', async (options, message) => {
+        const client = connectorWith(fakeAxios(apiResponse({data: []})));
+        await expect(collect(client.pages('tickets', options))).rejects.toThrow(message);
     });
 });

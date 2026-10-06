@@ -4,6 +4,42 @@ All notable changes to this project are documented in this file. The project fol
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-10-06
+
+### Security
+
+- Access tokens are no longer forwarded on cross-origin redirects. Previously the default `X-AUTH-TOKEN` header was sent to any host a Daktela response redirected to. The connector now strips `X-AUTH-TOKEN`, `Cookie`, and `Authorization` headers when a redirect leaves the instance origin, and configures Axios's `fetch` adapter to reject redirects.
+- `DaktelaError` no longer discloses the access token when it is logged, serialized with `JSON.stringify`, or inspected. Credential headers and the `accessToken` query parameter in the wrapped error's request config are redacted, and the raw `request` object is non-enumerable.
+- Raised the Axios floor to 1.20.0, which fixes 12 advisories affecting 1.0.0–1.19.0 (GHSA-vh66-26gq-q6x8, GHSA-9fr6-4gfg-395g, GHSA-r4gj-5m52-g5wh, and others). CI now fails on production dependency advisories of moderate severity or higher.
+- Access tokens are validated: they must be non-empty strings without control characters, and cookie authentication rejects tokens with whitespace, commas, or semicolons.
+
+### Added
+
+- `maxConsecutiveErrors` pagination option (default `3`): with `stopOnError: false`, a run aborts after that many consecutive failed pages instead of issuing up to 999 failing requests.
+- `DaktelaConnector#origin` exposes the configured instance origin.
+- Logger warning when query helper options (`fields`, `sort`, `pagination`, `filters`, `filter`) are ignored because `params` is supplied.
+
+### Fixed
+
+- `iterate()` throws a `DaktelaError` when a page contains application errors and `stopOnError` is `true`, instead of ending as if the data were complete.
+- `getAll()` reports application errors from every skipped page, not only the last page.
+- Reaching the default 999-page safety limit while data remains throws `DaktelaError` with code `ERR_PAGINATION_LIMIT` instead of silently truncating results at 99,900 records with the default page size. An explicit `maxPages` still caps a run without an error.
+- General retries respect `Retry-After` (bounded by `retry.maxDelayMs`).
+- `DaktelaError#message` includes the API's application error text, e.g. `Request failed with status code 400: Ticket title is required`.
+
+### Changed
+
+- Requests now time out after 60 seconds by default instead of waiting indefinitely. Pass `timeout: 0` to restore the previous behavior, or any other non-negative integer.
+- An invalid `timeout` (e.g. a string or negative number) now throws `TypeError` instead of silently disabling the timeout.
+- Upgraded Jest to 30 and dotenv to 16.6 (development only).
+
+### Upgrade notes
+
+- Long-running requests that take more than 60 seconds need an explicit `timeout`.
+- Code that matches exact `DaktelaError#message` strings should switch to `status`, `code`, or `errors`.
+- Code that relied on `iterate()` ending quietly on an application error, or on reading more than 999 pages without setting `maxPages`, now receives a `DaktelaError`.
+- Node.js 18 and 20 are end-of-life. They remain supported in 1.x; a future major release will require Node.js 22 or newer.
+
 ## [1.2.0] - 2026-08-20
 
 ### Security
@@ -61,5 +97,6 @@ No existing public CRUD method signatures or exports were removed. The deprecate
 
 - Initial version of the library.
 
-[Unreleased]: https://github.com/Daktela/daktela-v6-js-connector/compare/1.2.0...HEAD
+[Unreleased]: https://github.com/Daktela/daktela-v6-js-connector/compare/1.3.0...HEAD
+[1.3.0]: https://github.com/Daktela/daktela-v6-js-connector/compare/1.2.0...1.3.0
 [1.2.0]: https://github.com/Daktela/daktela-v6-js-connector/compare/1.1.0...1.2.0

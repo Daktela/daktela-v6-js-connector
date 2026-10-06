@@ -49,7 +49,7 @@ jobs:
           --workdir /app
           --env CI=true
           node:22-alpine
-          sh -c "npm ci && npm run test:coverage"
+          sh -c "npm ci && npm audit --omit=dev --audit-level=moderate && npm run test:coverage"
 
       - name: Upload coverage report
         uses: actions/upload-artifact@v4

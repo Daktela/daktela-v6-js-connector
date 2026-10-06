@@ -61,6 +61,7 @@ export interface ConnectorOptions {
     cookieAuth?: boolean;
     userAgent?: string;
     userAgentSuffix?: string;
+    /** Request timeout in milliseconds. Defaults to 60000; 0 disables the timeout. */
     timeout?: number;
     retry?: boolean | RetryOptions;
     rateLimit?: boolean | RateLimitOptions;
@@ -88,8 +89,11 @@ export interface RequestOptions<TPayload = unknown> extends QueryOptions {
 export interface IterationOptions extends QueryOptions {
     pageSize?: number;
     maxItems?: number | null;
+    /** Explicit page cap. Without it, reaching the 999-page safety limit throws ERR_PAGINATION_LIMIT. */
     maxPages?: number;
     stopOnError?: boolean;
+    /** With stopOnError: false, abort after this many consecutive failed pages. Defaults to 3. */
+    maxConsecutiveErrors?: number;
 }
 
 export interface HealthCheckResult {
@@ -129,6 +133,7 @@ export class DaktelaError extends Error {
 export class DaktelaConnector {
     constructor(url: string, accessToken?: string | null, options?: ConnectorOptions);
     readonly baseUrl: string;
+    readonly origin: string;
     readonly accessToken: string | null;
     readonly authMethod: AuthMethod;
     readonly api: AxiosInstance;

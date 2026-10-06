@@ -51,7 +51,9 @@ async function useConnector(): Promise<void> {
 
     for await (const ticket of client.iterate<Ticket>('tickets', {
         pageSize: 100,
-        maxItems: 500
+        maxItems: 500,
+        stopOnError: false,
+        maxConsecutiveErrors: 5
     })) {
         ticket.name;
     }
