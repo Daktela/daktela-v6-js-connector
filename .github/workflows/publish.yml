@@ -1,0 +1,65 @@
+name: Publish
+
+on:
+  release:
+    types:
+      - published
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to publish (e.g. 1.3.0)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-${{ github.event.release.tag_name || inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish to npm
+    runs-on: ubuntu-latest
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+    steps:
+      - name: Check out release tag
+        uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+
+      - name: Verify tag matches package version
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          if [ "$version" != "$RELEASE_TAG" ]; then
+            echo "::error::Tag $RELEASE_TAG does not match package.json version $version"
+            exit 1
+          fi
+
+      - name: Run release gate in Docker
+        run: >-
+          docker run --rm
+          --volume "$GITHUB_WORKSPACE:/app"
+          --workdir /app
+          --env CI=true
+          node:22-alpine
+          sh -c "npm ci && npm audit --omit=dev --audit-level=moderate && npm test && npm run test:types"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      # Trusted publishing (OIDC) requires npm CLI 11.5.1 or newer.
+      - name: Update npm
+        run: npm install --global npm@^11.5.1
+
+      - name: Publish
+        run: npm publish --access public

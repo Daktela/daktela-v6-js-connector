@@ -4,6 +4,10 @@ All notable changes to this project are documented in this file. The project fol
 
 ## [Unreleased]
 
+### Changed
+
+- Added a GitHub Actions workflow that publishes to npm through trusted publishing (OIDC) when a GitHub release is published, after verifying the tag matches `package.json` and running the audit, test, and type-check gate.
+
 ## [1.3.0] - 2026-10-06
 
 ### Security
