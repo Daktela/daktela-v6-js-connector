@@ -25,7 +25,8 @@ All notable changes to this project are documented in this file. The project fol
 - `getAll()` reports application errors from every skipped page, not only the last page.
 - Reaching the default 999-page safety limit while data remains throws `DaktelaError` with code `ERR_PAGINATION_LIMIT` instead of silently truncating results at 99,900 records with the default page size. An explicit `maxPages` still caps a run without an error.
 - General retries respect `Retry-After` (bounded by `retry.maxDelayMs`).
-- `DaktelaError#message` includes the API's application error text, e.g. `Request failed with status code 400: Ticket title is required`.
+- `DaktelaError#message` includes the API's application error text, e.g. `Request failed with status code 400: Ticket title is required`. Application errors raised by pagination use the code `ERR_DAKTELA_APPLICATION`.
+- A custom `axiosInstance` now keeps its own `defaults.timeout` when `timeout` is not passed; 1.2.0 overrode it with no timeout.
 
 ### Changed
 
@@ -36,6 +37,11 @@ All notable changes to this project are documented in this file. The project fol
 ### Upgrade notes
 
 - Long-running requests that take more than 60 seconds need an explicit `timeout`.
+- The constructor now throws `TypeError` for an empty-string or non-string access token (watch for patterns such as `process.env.TOKEN || ''`), and for cookie-mode tokens containing whitespace, commas, or semicolons. Pass `null` or omit the token for unauthenticated use.
+- `timeout` values such as `null`, strings, negative numbers, and non-integers now throw `TypeError`; in 1.2.0 they silently disabled the timeout.
+- With `stopOnError: false`, `pages()`, `iterate()`, and `getAll()` now throw after 3 consecutive failed pages instead of returning partial data. Raise `maxConsecutiveErrors` to tolerate longer failure streaks.
+- With Axios's `fetch` adapter, all redirects (including same-origin ones) are now rejected.
+- `DaktelaError#message` can now contain server-supplied error text; review log handling if API errors may echo personal data.
 - Code that matches exact `DaktelaError#message` strings should switch to `status`, `code`, or `errors`.
 - Code that relied on `iterate()` ending quietly on an application error, or on reading more than 999 pages without setting `maxPages`, now receives a `DaktelaError`.
 - Node.js 18 and 20 are end-of-life. They remain supported in 1.x; a future major release will require Node.js 22 or newer.

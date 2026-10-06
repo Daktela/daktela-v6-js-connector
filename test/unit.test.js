@@ -773,6 +773,67 @@ describe('hardening', () => {
         expect(response.errors).toEqual(['first', 'second']);
     });
 
+    test('resets the consecutive failure count after a successful page', async () => {
+        const failed = () => apiResponse(null, 200, {}, ['temporary']);
+        const http = fakeAxios(
+            failed(),
+            failed(),
+            apiResponse({data: [{id: 1}], total: 6}),
+            failed(),
+            failed(),
+            apiResponse({data: [], total: 6})
+        );
+        const client = connectorWith(http);
+        const response = await client.getAll('tickets', {
+            pageSize: 1,
+            stopOnError: false,
+            maxConsecutiveErrors: 3
+        });
+
+        expect(response.data).toEqual([{id: 1}]);
+        expect(response.errors).toHaveLength(4);
+        expect(http.request).toHaveBeenCalledTimes(6);
+    });
+
+    test('runs user redirect hooks after the guard and forces fetch redirects to fail', () => {
+        const userHook = jest.fn();
+        const client = connectorWith(fakeAxios(apiResponse({})));
+        const config = client.buildRequestConfig({
+            requestConfig: {beforeRedirect: userHook, fetchOptions: {redirect: 'follow', cache: 'no-store'}}
+        });
+        const options = {
+            href: 'https://elsewhere.test/x',
+            headers: {'X-AUTH-TOKEN': 'secret-token', Accept: 'application/json'}
+        };
+        config.beforeRedirect(options, {});
+
+        expect(options.headers).toEqual({Accept: 'application/json'});
+        expect(userHook).toHaveBeenCalledWith(options, {});
+        expect(config.fetchOptions).toEqual({redirect: 'error', cache: 'no-store'});
+    });
+
+    test('keeps the timeout of an injected Axios instance unless one is passed', () => {
+        const instance = {defaults: {timeout: 120000}, request: jest.fn()};
+        const inherited = connectorWith(instance);
+        const explicit = connectorWith(instance, {timeout: 5000});
+
+        expect(inherited.timeout).toBe(120000);
+        expect(inherited.buildRequestConfig().timeout).toBeUndefined();
+        expect(explicit.buildRequestConfig().timeout).toBe(5000);
+    });
+
+    test('summarizes object-shaped and very long API errors in the message', () => {
+        const objectError = new Daktela.DaktelaError(
+            requestError('Request failed', 400, {error: {form: {title: 'required'}}})
+        );
+        const longError = new Daktela.DaktelaError(
+            requestError('Request failed', 400, {error: ['x'.repeat(800)]})
+        );
+
+        expect(objectError.message).toBe('Request failed: {"form":{"title":"required"}}');
+        expect(longError.message).toHaveLength('Request failed: '.length + 501);
+    });
+
     test.each([
         [{maxConsecutiveErrors: 0}, 'maxConsecutiveErrors']
     ])('validates pagination option %p', async (options, message) => {

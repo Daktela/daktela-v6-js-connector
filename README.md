@@ -89,7 +89,7 @@ Available connector options:
 |---|---|
 | `authMethod` | `header` (default), `cookie`, or `query` |
 | `cookieAuth` | Deprecated compatibility option; use `authMethod` |
-| `timeout` | Request timeout in milliseconds; default `60000` (60 seconds). Use `0` to disable it. Must be a non-negative integer |
+| `timeout` | Request timeout in milliseconds; default `60000` (60 seconds). Use `0` to disable it. Must be a non-negative integer. With `axiosInstance` and no `timeout`, the instance's own timeout applies |
 | `userAgent` | Complete Node.js User-Agent value |
 | `userAgentSuffix` | Suffix appended to the connector User-Agent |
 | `retry` | `true` or retry configuration; disabled by default |
@@ -183,7 +183,7 @@ await client.request('PATCH', 'tickets/ticket_1', {
 
 Endpoints must be relative to the configured Daktela instance. Absolute URLs and relative path traversal segments are rejected so authentication credentials cannot be redirected to another destination.
 
-Redirects within the instance origin are followed normally. When a response redirects to a different origin (host, port, or scheme), the `X-AUTH-TOKEN`, `Cookie`, and `Authorization` headers are removed before the redirect is followed. A `beforeRedirect` hook you provide still runs after this check. Axios's `fetch` adapter cannot inspect redirects, so the connector configures it to reject all redirects.
+Redirects within the instance origin are followed normally. When a response redirects to a different origin (host, port, or scheme), the `X-AUTH-TOKEN`, `Cookie`, and `Authorization` headers are removed before the redirect is followed. A `beforeRedirect` hook you provide still runs after this check. Axios's `fetch` adapter cannot inspect redirects, so the connector configures it to reject all redirects. In browsers, the default XHR adapter follows redirects natively and cannot be intercepted; the browser's CORS rules apply instead.
 
 ## Query helpers
 
@@ -290,9 +290,9 @@ Pagination stops when any of these conditions is met:
 
 Without an explicit `maxPages`, a safety limit of 999 pages applies. Reaching it while data remains throws a `DaktelaError` with `code === 'ERR_PAGINATION_LIMIT'` rather than returning truncated data. Set `maxPages` or `maxItems` when you want a partial read.
 
-With the default `stopOnError: true`, a transport error is thrown. A page that contains application errors ends `pages()` after yielding that page, makes `iterate()` throw a `DaktelaError`, and is reported through `hasErrors()` on the `getAll()` result.
+With the default `stopOnError: true`, a transport error is thrown. A page that contains application errors ends `pages()` after yielding that page, makes `iterate()` throw a `DaktelaError` with `code === 'ERR_DAKTELA_APPLICATION'`, and is reported through `hasErrors()` on the `getAll()` result.
 
-Set `stopOnError: false` to skip failed pages. The run aborts with the last error after `maxConsecutiveErrors` consecutive failed pages (default `3`), so persistent failures such as revoked credentials do not trigger hundreds of requests. `getAll()` collects application errors from every skipped page in `errors`. A zero `maxItems` value returns immediately without making a request.
+Set `stopOnError: false` to skip failed pages. The run aborts after `maxConsecutiveErrors` consecutive failed pages (default `3`), rethrowing the last transport error or throwing a `DaktelaError` with `code === 'ERR_DAKTELA_APPLICATION'` for application errors, so persistent failures such as revoked credentials do not trigger hundreds of requests. `getAll()` collects application errors from every skipped page in `errors`. A zero `maxItems` value returns immediately without making a request.
 
 Pagination uses `skip`/`take` offsets. If records can be created or deleted during a long read, pass a stable `sort` (for example on `name`) to reduce duplicated or skipped records.
 
@@ -412,9 +412,9 @@ try {
 }
 ```
 
-When the API returns application errors, they are appended to `message` (for example `Request failed with status code 400: Ticket title is required`) and are available unchanged in `errors` and `apiError`.
+When the API returns application errors, they are appended to `message` (for example `Request failed with status code 400: Ticket title is required`) and are available unchanged in `errors` and `apiError`. This text comes from the server and can echo submitted data, so treat error messages with the same care as API payloads when logging them.
 
-`DaktelaError` preserves the original error in both `cause` and the backward-compatible `prevError` property. Before it is wrapped, the original error is redacted: `X-AUTH-TOKEN`, `Cookie`, and `Authorization` headers and the `accessToken` query parameter in its request config are replaced with `[REDACTED]`, and the raw `request` object becomes non-enumerable (still accessible, but omitted from serialization and `util.inspect`). Logging or serializing the error therefore does not disclose the access token. Bodyless and non-JSON errors are handled without masking the original failure.
+`DaktelaError` preserves the original error in both `cause` and the backward-compatible `prevError` property. Before it is wrapped, the original error is redacted: `X-AUTH-TOKEN`, `Cookie`, and `Authorization` headers and the `accessToken` query parameter in its request config are replaced with `[REDACTED]`, and the raw `request` object becomes non-enumerable (still accessible, but omitted from serialization and `util.inspect`). Logging or serializing the error therefore does not disclose the access token. Code that reads `error.cause.request` directly, or inspects with `showHidden: true`, can still see the raw request. Bodyless and non-JSON errors are handled without masking the original failure.
 
 ## Health checks
 

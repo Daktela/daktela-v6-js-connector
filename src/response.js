@@ -170,6 +170,5 @@ module.exports = {
     DaktelaError,
     getHeader,
     normalizeErrors,
-    parseRetryAfter,
-    redactCredentials
+    parseRetryAfter
 };

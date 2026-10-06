@@ -304,7 +304,11 @@ class DaktelaConnector {
             this.requestHeaders['User-Agent'] = headers['User-Agent'];
         }
 
-        const timeout = normalizeTimeout(options.timeout);
+        // An injected Axios instance keeps its own timeout unless one is passed explicitly.
+        this.inheritTimeout = options.axiosInstance != null && options.timeout === undefined;
+        const timeout = this.inheritTimeout
+            ? (options.axiosInstance.defaults?.timeout ?? 0)
+            : normalizeTimeout(options.timeout);
         const axiosConfig = isObject(options.axiosConfig) ? {...options.axiosConfig} : {};
         delete axiosConfig.baseURL;
         delete axiosConfig.headers;
@@ -401,7 +405,7 @@ class DaktelaConnector {
             ...(requestConfig.fetchOptions ?? {}),
             redirect: 'error'
         };
-        if (requestConfig.timeout === undefined) {
+        if (requestConfig.timeout === undefined && !this.inheritTimeout) {
             requestConfig.timeout = this.timeout;
         }
         return requestConfig;

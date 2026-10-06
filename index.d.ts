@@ -61,7 +61,10 @@ export interface ConnectorOptions {
     cookieAuth?: boolean;
     userAgent?: string;
     userAgentSuffix?: string;
-    /** Request timeout in milliseconds. Defaults to 60000; 0 disables the timeout. */
+    /**
+     * Request timeout in milliseconds. Defaults to 60000; 0 disables the timeout.
+     * When axiosInstance is supplied and timeout is omitted, the instance's own timeout applies.
+     */
     timeout?: number;
     retry?: boolean | RetryOptions;
     rateLimit?: boolean | RateLimitOptions;
