@@ -30,7 +30,7 @@ jobs:
       RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
     steps:
       - name: Check out release tag
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: refs/tags/${{ env.RELEASE_TAG }}
 
@@ -42,17 +42,19 @@ jobs:
             exit 1
           fi
 
+      # The checkout is mounted read-only and copied inside the container, so
+      # dependency install scripts cannot alter the files that get published.
       - name: Run release gate in Docker
         run: >-
           docker run --rm
-          --volume "$GITHUB_WORKSPACE:/app"
-          --workdir /app
+          --volume "$GITHUB_WORKSPACE:/src:ro"
+          --workdir /tmp
           --env CI=true
           node:22-alpine
-          sh -c "npm ci && npm audit --omit=dev --audit-level=moderate && npm test && npm run test:types"
+          sh -c "cp -r /src /tmp/app && cd /tmp/app && npm ci && npm audit --omit=dev --audit-level=moderate && npm test && npm run test:types"
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
@@ -61,5 +63,8 @@ jobs:
       - name: Update npm
         run: npm install --global npm@^11.5.1
 
+      - name: Verify the working tree is unmodified
+        run: git diff --exit-code && test -z "$(git status --porcelain)"
+
       - name: Publish
-        run: npm publish --access public
+        run: npm publish --access public --ignore-scripts
