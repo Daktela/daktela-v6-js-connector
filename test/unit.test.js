@@ -858,6 +858,39 @@ describe('hardening', () => {
         expect(http.request).toHaveBeenCalledTimes(3);
     });
 
+    test('a canceled request ends pagination immediately even with stopOnError: false', async () => {
+        const logger = {warn: jest.fn()};
+        const http = fakeAxios(
+            apiResponse({data: [{id: 1}], total: 5}),
+            requestError('canceled', null, undefined, {}, 'ERR_CANCELED'),
+            apiResponse({data: [{id: 3}], total: 5})
+        );
+        const client = connectorWith(http, {logger});
+
+        await expect(client.getAll('tickets', {
+            pageSize: 1,
+            stopOnError: false
+        })).rejects.toMatchObject({isCanceled: true});
+        expect(http.request).toHaveBeenCalledTimes(2);
+        expect(logger.warn).not.toHaveBeenCalled();
+    });
+
+    test('invalid arguments are thrown immediately even with stopOnError: false', async () => {
+        const logger = {warn: jest.fn()};
+        const http = fakeAxios(apiResponse({data: []}));
+        const client = connectorWith(http, {logger});
+
+        await expect(collect(client.iterate('../tickets', {
+            stopOnError: false
+        }))).rejects.toThrow(TypeError);
+        await expect(client.getAll('tickets', {
+            stopOnError: false,
+            retry: 'always'
+        })).rejects.toThrow(TypeError);
+        expect(http.request).not.toHaveBeenCalled();
+        expect(logger.warn).not.toHaveBeenCalled();
+    });
+
     test('logs only the endpoint path, never its query string', async () => {
         const logger = {debug: jest.fn(), warn: jest.fn(), error: jest.fn()};
         const http = fakeAxios(

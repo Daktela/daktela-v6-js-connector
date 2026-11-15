@@ -4,6 +4,13 @@ All notable changes to this project are documented in this file. The project fol
 
 ## [Unreleased]
 
+## [1.3.2] - 2026-11-15
+
+### Fixed
+
+- With `stopOnError: false`, `pages()`, `iterate()`, and `getAll()` treated a canceled request (`AbortSignal`) as a failed page: it was logged, reported as skipped, and pagination continued until `maxConsecutiveErrors` was reached. A cancellation now ends pagination immediately with the `DaktelaError` (`isCanceled === true`).
+- With `stopOnError: false`, invalid arguments such as a malformed endpoint or `retry` option are thrown immediately as `TypeError` instead of after `maxConsecutiveErrors` attempts.
+
 ## [1.3.1] - 2026-11-15
 
 ### Security
@@ -128,7 +135,8 @@ No existing public CRUD method signatures or exports were removed. The deprecate
 
 - Initial version of the library.
 
-[Unreleased]: https://github.com/Daktela/daktela-v6-js-connector/compare/1.3.1...HEAD
+[Unreleased]: https://github.com/Daktela/daktela-v6-js-connector/compare/1.3.2...HEAD
+[1.3.2]: https://github.com/Daktela/daktela-v6-js-connector/compare/1.3.1...1.3.2
 [1.3.1]: https://github.com/Daktela/daktela-v6-js-connector/compare/1.3.0...1.3.1
 [1.3.0]: https://github.com/Daktela/daktela-v6-js-connector/compare/1.2.0...1.3.0
 [1.2.0]: https://github.com/Daktela/daktela-v6-js-connector/compare/1.1.0...1.2.0
