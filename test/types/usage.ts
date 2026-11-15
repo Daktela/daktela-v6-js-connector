@@ -67,8 +67,9 @@ async function useConnector(): Promise<void> {
 
     const all = await client.getAll<Ticket>('tickets', {stopOnError: false});
     all.data?.map((ticket) => ticket.name);
-    const skipped = all.errors as Array<string | SkippedPageError>;
-    skipped.forEach((entry) => typeof entry === 'string' ? entry : entry.skip);
+    const skipped = all.errors.filter((entry): entry is SkippedPageError =>
+        (entry as {type?: unknown} | null)?.type === 'skippedPage');
+    skipped.forEach((entry) => entry.skip);
 
     const health: HealthCheckResult = await client.healthCheck();
     health.latencyMs;

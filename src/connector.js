@@ -226,6 +226,12 @@ function validateEndpoint(endpoint) {
     return relative;
 }
 
+// Log contexts carry only the endpoint path; query strings can hold filters
+// with personal data or a caller-supplied token.
+function endpointPath(endpoint) {
+    return String(endpoint).trim().replace(/^\/+/, '').split(/[?#]/, 1)[0];
+}
+
 function abortError() {
     const error = new Error('The request was canceled');
     error.name = 'AbortError';
@@ -264,6 +270,7 @@ function withoutPaginationOptions(options) {
 
 function skippedPage(error, skip, take) {
     return {
+        type: 'skippedPage',
         message: error?.message ?? 'Daktela request failed',
         code: error?.code ?? null,
         status: error?.status ?? null,
@@ -317,7 +324,7 @@ async function* paginate(connector, endpoint, options, onSkippedPage) {
             }
             const skipped = skippedPage(error, skip, pageSize);
             connector.log('warn', 'Skipped a failed Daktela API page', {
-                endpoint,
+                endpoint: endpointPath(endpoint),
                 skip,
                 take: pageSize,
                 status: skipped.status,
@@ -526,6 +533,7 @@ class DaktelaConnector {
         }
         const normalizedMethod = method.toLowerCase();
         const normalizedEndpoint = validateEndpoint(endpoint);
+        const logEndpoint = endpointPath(normalizedEndpoint);
         const config = this.buildRequestConfig(options);
         const retryConfig = options.retry === undefined
             ? this.retryConfig
@@ -540,7 +548,7 @@ class DaktelaConnector {
             try {
                 this.log('debug', 'Sending Daktela API request', {
                     method: normalizedMethod.toUpperCase(),
-                    endpoint: normalizedEndpoint,
+                    endpoint: logEndpoint,
                     attempt: retries + rateLimitRetries + 1
                 });
                 const response = await this.api.request({
@@ -569,7 +577,7 @@ class DaktelaConnector {
                     if (waitMs <= rateLimitConfig.maxWaitMs) {
                         rateLimitRetries++;
                         this.log('warn', 'Daktela API rate limit reached', {
-                            endpoint: normalizedEndpoint,
+                            endpoint: logEndpoint,
                             waitMs,
                             retry: rateLimitRetries
                         });
@@ -586,7 +594,7 @@ class DaktelaConnector {
                     const waitMs = this.retryDelay(retryConfig, retries, error);
                     retries++;
                     this.log('warn', 'Retrying Daktela API request', {
-                        endpoint: normalizedEndpoint,
+                        endpoint: logEndpoint,
                         waitMs,
                         retry: retries,
                         status
@@ -597,7 +605,7 @@ class DaktelaConnector {
 
                 this.log('error', 'Daktela API request failed', {
                     method: normalizedMethod.toUpperCase(),
-                    endpoint: normalizedEndpoint,
+                    endpoint: logEndpoint,
                     status,
                     code: error?.code ?? null
                 });

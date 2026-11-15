@@ -8,20 +8,26 @@ All notable changes to this project are documented in this file. The project fol
 
 ### Security
 
-- Raised the Axios floor to 1.21.1, which requires `follow-redirects` 1.16.2 or newer. `follow-redirects` 1.16.0–1.16.1 could forward credential headers on cross-origin redirects (GHSA-q3jh-wrc6-jgq8, GHSA-8r9p-f939-6h3c, GHSA-mrwp-f3q8-3g9p). The connector's redirect guard already removed its own `X-AUTH-TOKEN`, `Cookie`, and `Authorization` headers on cross-origin redirects; the upgrade also fixes the underlying redirect handling. Projects with an existing lockfile should update `follow-redirects` to 1.16.2 or newer.
+- Raised the Axios floor to 1.21.1, which requires `follow-redirects` 1.16.2 or newer. `follow-redirects` 1.16.0–1.16.1 could forward credential headers on cross-origin redirects (GHSA-q3jh-wrc6-jgq8, GHSA-8r9p-f939-6h3c, GHSA-mrwp-f3q8-3g9p). The connector's own credentials were not exposed, because its redirect guard already removed `X-AUTH-TOKEN`, `Cookie`, and `Authorization` headers on cross-origin redirects; the upgrade fixes the underlying redirect handling and clears dependency scanners. Projects with an existing lockfile should update `follow-redirects` to 1.16.2 or newer.
 
 ### Fixed
 
-- `getAll()` with `stopOnError: false` reports pages skipped after a request failure. Previously only application errors were collected, so a failed page silently disappeared from the result while `hasErrors()` returned `false`. Each such page now adds `{message, code, status, skip, take}` to `errors`.
+- `getAll()` with `stopOnError: false` reports pages skipped after a request failure. Previously only application errors were collected, so a failed page silently disappeared from the result while `hasErrors()` returned `false`. Each such page now adds `{type: 'skippedPage', message, code, status, skip, take}` to `errors`.
 - `pages()` and `iterate()` log a `warn` entry through the configured `logger` for every page skipped after a request failure.
+- Logger contexts contain only the endpoint path. Query strings passed as part of the endpoint, which can hold filter values, are no longer logged.
 - The TypeScript declarations use `export =` to match the CommonJS module. They previously declared a `default` export that does not exist at runtime, which misled TypeScript under `node16`/`nodenext` and in projects without `esModuleInterop`. Named, namespace, `require()`, and `esModuleInterop` default imports are unchanged. Added the `SkippedPageError` type.
 
 ### Changed
 
-- Added a GitHub Actions workflow that publishes to npm through trusted publishing (OIDC) when a GitHub release is published, after verifying the tag matches `package.json` and running the audit, test, and type-check gate.
+- Added a GitHub Actions workflow that publishes to npm through trusted publishing (OIDC) when a GitHub release is published, after verifying the tag matches `package.json` and running the audit, test, type-check, and package-declaration gate.
 - CI now also runs on Node.js 26, checks the packed declarations with `@arethetypeswrong/cli` (`npm run test:package`), pins every action to a commit SHA on its current major version, and checks out without persisted credentials.
 - Added Dependabot version updates for npm and GitHub Actions, and a manual workflow that runs the live integration suite against a test instance.
 - Upgraded dotenv to 18 (development only).
+
+### Upgrade notes
+
+- TypeScript projects that use a default import (`import Daktela from '@daktela/daktela-connector'`) without `esModuleInterop` or `allowSyntheticDefaultImports` now get error TS1259. Switch to named imports (`import {DaktelaConnector} from '@daktela/daktela-connector'`) or enable `esModuleInterop`. Such imports only worked at runtime through bundler interop; under plain CommonJS they resolved to `undefined`.
+- `getAll()` with `stopOnError: false` now reports pages skipped after a request failure: `hasErrors()` returns `true` and `errors` contains `SkippedPageError` objects. Code that expects only API errors in `errors` should check `entry.type === 'skippedPage'`.
 
 ## [1.3.0] - 2026-10-06
 
