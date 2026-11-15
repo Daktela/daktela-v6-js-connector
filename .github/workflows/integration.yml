@@ -1,0 +1,55 @@
+name: Integration
+
+# Runs the live API suite against a dedicated test instance. It creates and
+# deletes a temporary status, so it is manual only and never runs on pull requests.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  integration:
+    name: Live Daktela API
+    runs-on: ubuntu-latest
+    environment: integration
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Require test instance credentials
+        env:
+          INSTANCE: ${{ secrets.DAKTELA_INSTANCE }}
+          ACCESS_TOKEN: ${{ secrets.DAKTELA_ACCESS_TOKEN }}
+        run: |
+          if [ -z "$INSTANCE" ] || [ -z "$ACCESS_TOKEN" ]; then
+            echo "::error::Set the DAKTELA_INSTANCE and DAKTELA_ACCESS_TOKEN secrets on the integration environment"
+            exit 1
+          fi
+
+      # Dependencies are installed without the credentials in the environment,
+      # so install scripts never see them.
+      - name: Install dependencies in Docker
+        run: >-
+          docker run --rm
+          --volume "$GITHUB_WORKSPACE:/app"
+          --workdir /app
+          --env CI=true
+          node:22-alpine
+          npm ci
+
+      - name: Run integration tests in Docker
+        env:
+          INSTANCE: ${{ secrets.DAKTELA_INSTANCE }}
+          ACCESS_TOKEN: ${{ secrets.DAKTELA_ACCESS_TOKEN }}
+        run: >-
+          docker run --rm
+          --volume "$GITHUB_WORKSPACE:/app"
+          --workdir /app
+          --env CI=true
+          --env INSTANCE
+          --env ACCESS_TOKEN
+          node:22-alpine
+          npm run test:integration

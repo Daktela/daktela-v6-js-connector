@@ -7,8 +7,15 @@ import Daktela, {
     Pagination,
     Sort,
     SortDescending,
-    type HealthCheckResult
+    type HealthCheckResult,
+    type SkippedPageError
 } from '../..';
+import DaktelaRequired = require('../..');
+
+// module.exports has no `default` property, so the types must not claim one.
+// @ts-expect-error
+void DaktelaRequired.default;
+void new DaktelaRequired.DaktelaConnector('example.daktela.test');
 
 type Ticket = {
     name: string;
@@ -58,8 +65,10 @@ async function useConnector(): Promise<void> {
         ticket.name;
     }
 
-    const all = await client.getAll<Ticket>('tickets');
+    const all = await client.getAll<Ticket>('tickets', {stopOnError: false});
     all.data?.map((ticket) => ticket.name);
+    const skipped = all.errors as Array<string | SkippedPageError>;
+    skipped.forEach((entry) => typeof entry === 'string' ? entry : entry.skip);
 
     const health: HealthCheckResult = await client.healthCheck();
     health.latencyMs;

@@ -262,6 +262,112 @@ function withoutPaginationOptions(options) {
     return result;
 }
 
+function skippedPage(error, skip, take) {
+    return {
+        message: error?.message ?? 'Daktela request failed',
+        code: error?.code ?? null,
+        status: error?.status ?? null,
+        skip,
+        take
+    };
+}
+
+// Shared by pages(), iterate(), and getAll(). onSkippedPage receives a summary of
+// every page dropped after a request failure, so getAll() can report it.
+async function* paginate(connector, endpoint, options, onSkippedPage) {
+    if (!isObject(options)) {
+        throw new TypeError('Pagination options must be an object');
+    }
+    const pageSize = options.pageSize ?? options.pagination?.take ?? PaginationTake;
+    const explicitMaxPages = options.maxPages !== undefined && options.maxPages !== null;
+    const maxPages = explicitMaxPages ? options.maxPages : DEFAULT_MAX_PAGES;
+    const stopOnError = options.stopOnError ?? true;
+    const maxConsecutiveErrors = options.maxConsecutiveErrors
+        ?? DEFAULT_MAX_CONSECUTIVE_ERRORS;
+    let skip = options.pagination?.skip ?? PaginationSkip;
+
+    if (!Number.isInteger(pageSize) || pageSize <= 0) {
+        throw new TypeError('pageSize must be a positive integer');
+    }
+    if (!Number.isInteger(maxPages) || maxPages <= 0) {
+        throw new TypeError('maxPages must be a positive integer');
+    }
+    if (!Number.isInteger(maxConsecutiveErrors) || maxConsecutiveErrors <= 0) {
+        throw new TypeError('maxConsecutiveErrors must be a positive integer');
+    }
+
+    const baseOptions = withoutPaginationOptions(options);
+    let consecutiveErrors = 0;
+    for (let page = 0; page < maxPages; page++) {
+        const pageOptions = {...baseOptions};
+        if (isObject(baseOptions.params)) {
+            delete pageOptions.pagination;
+            pageOptions.params = {...baseOptions.params, take: pageSize, skip};
+        } else {
+            pageOptions.pagination = {take: pageSize, skip};
+        }
+
+        let response;
+        try {
+            response = await connector.get(endpoint, pageOptions);
+        } catch (error) {
+            consecutiveErrors++;
+            if (stopOnError || consecutiveErrors >= maxConsecutiveErrors) {
+                throw error;
+            }
+            const skipped = skippedPage(error, skip, pageSize);
+            connector.log('warn', 'Skipped a failed Daktela API page', {
+                endpoint,
+                skip,
+                take: pageSize,
+                status: skipped.status,
+                code: skipped.code
+            });
+            if (onSkippedPage) {
+                onSkippedPage(skipped);
+            }
+            skip += pageSize;
+            continue;
+        }
+
+        yield response;
+        if (response.hasErrors()) {
+            if (stopOnError) {
+                return;
+            }
+            consecutiveErrors++;
+            if (consecutiveErrors >= maxConsecutiveErrors) {
+                throw applicationError(
+                    response,
+                    `Pagination aborted after ${consecutiveErrors} consecutive failed pages`
+                );
+            }
+            skip += pageSize;
+            continue;
+        }
+        consecutiveErrors = 0;
+
+        if (!Array.isArray(response.data)
+            || response.data.length < pageSize
+            || (response.total != null && skip + response.data.length >= response.total)
+        ) {
+            return;
+        }
+        skip += pageSize;
+    }
+
+    // An explicit maxPages is an intentional cap. Hitting the default safety
+    // bound means data remains, so fail loudly instead of truncating silently.
+    if (!explicitMaxPages) {
+        const error = new Error(
+            `Pagination reached the default safety limit of ${DEFAULT_MAX_PAGES} pages `
+            + 'before the end of the data; set maxPages or maxItems explicitly'
+        );
+        error.code = 'ERR_PAGINATION_LIMIT';
+        throw new DaktelaError(error);
+    }
+}
+
 class DaktelaConnector {
     constructor(url, accessToken = null, options = {}) {
         if (!isObject(options)) {
@@ -613,86 +719,7 @@ class DaktelaConnector {
     }
 
     async *pages(endpoint, options = {}) {
-        if (!isObject(options)) {
-            throw new TypeError('Pagination options must be an object');
-        }
-        const pageSize = options.pageSize ?? options.pagination?.take ?? PaginationTake;
-        const explicitMaxPages = options.maxPages !== undefined && options.maxPages !== null;
-        const maxPages = explicitMaxPages ? options.maxPages : DEFAULT_MAX_PAGES;
-        const stopOnError = options.stopOnError ?? true;
-        const maxConsecutiveErrors = options.maxConsecutiveErrors
-            ?? DEFAULT_MAX_CONSECUTIVE_ERRORS;
-        let skip = options.pagination?.skip ?? PaginationSkip;
-
-        if (!Number.isInteger(pageSize) || pageSize <= 0) {
-            throw new TypeError('pageSize must be a positive integer');
-        }
-        if (!Number.isInteger(maxPages) || maxPages <= 0) {
-            throw new TypeError('maxPages must be a positive integer');
-        }
-        if (!Number.isInteger(maxConsecutiveErrors) || maxConsecutiveErrors <= 0) {
-            throw new TypeError('maxConsecutiveErrors must be a positive integer');
-        }
-
-        const baseOptions = withoutPaginationOptions(options);
-        let consecutiveErrors = 0;
-        for (let page = 0; page < maxPages; page++) {
-            const pageOptions = {...baseOptions};
-            if (isObject(baseOptions.params)) {
-                delete pageOptions.pagination;
-                pageOptions.params = {...baseOptions.params, take: pageSize, skip};
-            } else {
-                pageOptions.pagination = {take: pageSize, skip};
-            }
-
-            let response;
-            try {
-                response = await this.get(endpoint, pageOptions);
-            } catch (error) {
-                consecutiveErrors++;
-                if (stopOnError || consecutiveErrors >= maxConsecutiveErrors) {
-                    throw error;
-                }
-                skip += pageSize;
-                continue;
-            }
-
-            yield response;
-            if (response.hasErrors()) {
-                if (stopOnError) {
-                    return;
-                }
-                consecutiveErrors++;
-                if (consecutiveErrors >= maxConsecutiveErrors) {
-                    throw applicationError(
-                        response,
-                        `Pagination aborted after ${consecutiveErrors} consecutive failed pages`
-                    );
-                }
-                skip += pageSize;
-                continue;
-            }
-            consecutiveErrors = 0;
-
-            if (!Array.isArray(response.data)
-                || response.data.length < pageSize
-                || (response.total != null && skip + response.data.length >= response.total)
-            ) {
-                return;
-            }
-            skip += pageSize;
-        }
-
-        // An explicit maxPages is an intentional cap. Hitting the default safety
-        // bound means data remains, so fail loudly instead of truncating silently.
-        if (!explicitMaxPages) {
-            const error = new Error(
-                `Pagination reached the default safety limit of ${DEFAULT_MAX_PAGES} pages `
-                + 'before the end of the data; set maxPages or maxItems explicitly'
-            );
-            error.code = 'ERR_PAGINATION_LIMIT';
-            throw new DaktelaError(error);
-        }
+        yield* paginate(this, endpoint, options, null);
     }
 
     async *iterate(endpoint, options = {}) {
@@ -747,7 +774,8 @@ class DaktelaConnector {
             });
         }
 
-        for await (const response of this.pages(endpoint, options)) {
+        const recordSkippedPage = (skipped) => errors.push(skipped);
+        for await (const response of paginate(this, endpoint, options, recordSkippedPage)) {
             lastResponse = response;
             if (response.hasErrors()) {
                 errors.push(...response.errors);
