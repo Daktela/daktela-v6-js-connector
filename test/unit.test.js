@@ -788,8 +788,22 @@ describe('hardening', () => {
         expect(response.total).toBe(4);
         expect(response.hasErrors()).toBe(true);
         expect(response.errors).toEqual([
-            {message: 'socket hang up', code: 'ECONNRESET', status: null, skip: 1, take: 1},
-            {message: 'Service Unavailable: maintenance', code: null, status: 503, skip: 2, take: 1}
+            {
+                type: 'skippedPage',
+                message: 'socket hang up',
+                code: 'ECONNRESET',
+                status: null,
+                skip: 1,
+                take: 1
+            },
+            {
+                type: 'skippedPage',
+                message: 'Service Unavailable: maintenance',
+                code: null,
+                status: 503,
+                skip: 2,
+                take: 1
+            }
         ]);
         expect(logger.warn).toHaveBeenCalledWith('Skipped a failed Daktela API page', {
             endpoint: 'tickets',
@@ -798,6 +812,70 @@ describe('hardening', () => {
             status: null,
             code: 'ECONNRESET'
         });
+    });
+
+    test('getAll() keeps application and transport failures in page order', async () => {
+        const http = fakeAxios(
+            apiResponse(null, 200, {}, ['application']),
+            requestError('Bad Gateway', 502),
+            apiResponse({data: [{id: 3}], total: 3})
+        );
+        const response = await connectorWith(http).getAll('tickets', {
+            pageSize: 1,
+            stopOnError: false
+        });
+
+        expect(response.data).toEqual([{id: 3}]);
+        expect(response.errors).toEqual([
+            'application',
+            {type: 'skippedPage', message: 'Bad Gateway', code: null, status: 502, skip: 1, take: 1}
+        ]);
+    });
+
+    test('getAll() rethrows the transport error that exhausts maxConsecutiveErrors', async () => {
+        const http = fakeAxios(requestError('Service Unavailable', 503));
+        const client = connectorWith(http);
+
+        await expect(client.getAll('tickets', {
+            stopOnError: false,
+            maxConsecutiveErrors: 2
+        })).rejects.toMatchObject({status: 503, message: 'Service Unavailable'});
+        expect(http.request).toHaveBeenCalledTimes(2);
+    });
+
+    test('application and transport failures count together toward maxConsecutiveErrors', async () => {
+        const http = fakeAxios(
+            apiResponse(null, 200, {}, ['application']),
+            requestError('Bad Gateway', 502),
+            apiResponse(null, 200, {}, ['application again'])
+        );
+
+        await expect(connectorWith(http).getAll('tickets', {
+            pageSize: 1,
+            stopOnError: false,
+            maxConsecutiveErrors: 3
+        })).rejects.toThrow('Pagination aborted after 3 consecutive failed pages');
+        expect(http.request).toHaveBeenCalledTimes(3);
+    });
+
+    test('logs only the endpoint path, never its query string', async () => {
+        const logger = {debug: jest.fn(), warn: jest.fn(), error: jest.fn()};
+        const http = fakeAxios(
+            requestError('Bad Gateway', 502),
+            apiResponse({data: [], total: 0})
+        );
+        const client = connectorWith(http, {logger});
+        await collect(client.pages('/tickets?filter[email]=jane@example.com', {stopOnError: false}));
+
+        const contexts = [
+            ...logger.debug.mock.calls,
+            ...logger.warn.mock.calls,
+            ...logger.error.mock.calls
+        ].map(([, context]) => context);
+        expect(logger.warn).toHaveBeenCalledTimes(1);
+        expect(logger.error).toHaveBeenCalledTimes(1);
+        contexts.forEach((context) => expect(context.endpoint).toBe('tickets'));
+        expect(JSON.stringify(contexts)).not.toContain('jane@example.com');
     });
 
     test('iterate() logs pages skipped after transport failures', async () => {

@@ -4,6 +4,10 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    # Security updates ignore the cooldown; version updates wait for new
+    # releases to age before they are proposed.
+    cooldown:
+      default-days: 7
     open-pull-requests-limit: 5
     groups:
       development-dependencies:
@@ -16,6 +20,8 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     groups:
       github-actions:
         patterns:

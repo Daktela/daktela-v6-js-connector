@@ -11,6 +11,9 @@ permissions:
 jobs:
   integration:
     name: Live Daktela API
+    # The integration environment also restricts deployments to main, so code
+    # from other branches cannot run with the credentials.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: integration
     steps:
@@ -29,16 +32,17 @@ jobs:
             exit 1
           fi
 
-      # Dependencies are installed without the credentials in the environment,
-      # so install scripts never see them.
+      # Dependencies are installed without the credentials and without lifecycle
+      # scripts. Dependency code still runs with the credentials during the tests,
+      # so use a least-privilege token on a disposable test instance.
       - name: Install dependencies in Docker
         run: >-
           docker run --rm
           --volume "$GITHUB_WORKSPACE:/app"
           --workdir /app
           --env CI=true
-          node:22-alpine
-          npm ci
+          node:22-alpine@sha256:1314fb30ec37592d5845e5a160d522c0e680972aa534549940b8d73bde88481a
+          npm ci --ignore-scripts
 
       - name: Run integration tests in Docker
         env:
@@ -51,5 +55,5 @@ jobs:
           --env CI=true
           --env INSTANCE
           --env ACCESS_TOKEN
-          node:22-alpine
+          node:22-alpine@sha256:1314fb30ec37592d5845e5a160d522c0e680972aa534549940b8d73bde88481a
           npm run test:integration

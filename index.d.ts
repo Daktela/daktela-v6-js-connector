@@ -105,6 +105,8 @@ declare namespace Daktela {
 
     /** Entry that getAll() adds to `errors` for a page skipped after a request failure. */
     export interface SkippedPageError {
+        /** Distinguishes these entries from API errors, which can also be objects. */
+        type: 'skippedPage';
         message: string;
         code: string | null;
         status: number | null;

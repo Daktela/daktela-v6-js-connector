@@ -62,9 +62,10 @@ jobs:
           # A poisoned dependency cache could expose the OIDC publish token.
           package-manager-cache: false
 
-      # Trusted publishing (OIDC) requires npm CLI 11.5.1 or newer.
+      # Trusted publishing (OIDC) requires npm CLI 11.5.1 or newer. The exact
+      # version is pinned because this job holds the OIDC publish permission.
       - name: Update npm
-        run: npm install --global npm@^11.5.1
+        run: npm install --global npm@11.21.2
 
       - name: Verify the working tree is unmodified
         run: git diff --exit-code && test -z "$(git status --porcelain)"
