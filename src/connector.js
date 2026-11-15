@@ -318,6 +318,11 @@ async function* paginate(connector, endpoint, options, onSkippedPage) {
         try {
             response = await connector.get(endpoint, pageOptions);
         } catch (error) {
+            // Cancellations and invalid arguments (TypeError rather than
+            // DaktelaError) are never skippable page failures.
+            if (!(error instanceof DaktelaError) || error.isCanceled) {
+                throw error;
+            }
             consecutiveErrors++;
             if (stopOnError || consecutiveErrors >= maxConsecutiveErrors) {
                 throw error;
