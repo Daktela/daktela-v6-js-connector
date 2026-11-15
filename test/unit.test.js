@@ -773,6 +773,53 @@ describe('hardening', () => {
         expect(response.errors).toEqual(['first', 'second']);
     });
 
+    test('getAll() reports pages skipped after transport failures', async () => {
+        const logger = {warn: jest.fn()};
+        const http = fakeAxios(
+            apiResponse({data: [{id: 1}], total: 4}),
+            requestError('socket hang up', null, undefined, {}, 'ECONNRESET'),
+            requestError('Service Unavailable', 503, {error: ['maintenance']}),
+            apiResponse({data: [{id: 4}], total: 4})
+        );
+        const client = connectorWith(http, {logger});
+        const response = await client.getAll('tickets', {pageSize: 1, stopOnError: false});
+
+        expect(response.data).toEqual([{id: 1}, {id: 4}]);
+        expect(response.total).toBe(4);
+        expect(response.hasErrors()).toBe(true);
+        expect(response.errors).toEqual([
+            {message: 'socket hang up', code: 'ECONNRESET', status: null, skip: 1, take: 1},
+            {message: 'Service Unavailable: maintenance', code: null, status: 503, skip: 2, take: 1}
+        ]);
+        expect(logger.warn).toHaveBeenCalledWith('Skipped a failed Daktela API page', {
+            endpoint: 'tickets',
+            skip: 1,
+            take: 1,
+            status: null,
+            code: 'ECONNRESET'
+        });
+    });
+
+    test('iterate() logs pages skipped after transport failures', async () => {
+        const logger = {warn: jest.fn()};
+        const http = fakeAxios(
+            apiResponse({data: [{id: 1}], total: 3}),
+            requestError('Bad Gateway', 502),
+            apiResponse({data: [{id: 3}], total: 3})
+        );
+        const client = connectorWith(http, {logger});
+        const items = await collect(client.iterate('tickets', {pageSize: 1, stopOnError: false}));
+
+        expect(items).toEqual([{id: 1}, {id: 3}]);
+        expect(logger.warn).toHaveBeenCalledWith('Skipped a failed Daktela API page', {
+            endpoint: 'tickets',
+            skip: 1,
+            take: 1,
+            status: 502,
+            code: null
+        });
+    });
+
     test('resets the consecutive failure count after a successful page', async () => {
         const failed = () => apiResponse(null, 200, {}, ['temporary']);
         const http = fakeAxios(

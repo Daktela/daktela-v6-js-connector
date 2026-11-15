@@ -56,7 +56,7 @@ const response = await client.get('tickets', {
 });
 ```
 
-The package includes TypeScript declarations. It is implemented as CommonJS and can be consumed from both CommonJS and Node.js ES modules.
+The package includes TypeScript declarations. It is implemented as CommonJS and can be consumed from both CommonJS and Node.js ES modules. Named imports work everywhere; a default import (`import Daktela from '@daktela/daktela-connector'`) needs `esModuleInterop` in CommonJS TypeScript projects.
 
 ## Configuration
 
@@ -292,7 +292,7 @@ Without an explicit `maxPages`, a safety limit of 999 pages applies. Reaching it
 
 With the default `stopOnError: true`, a transport error is thrown. A page that contains application errors ends `pages()` after yielding that page, makes `iterate()` throw a `DaktelaError` with `code === 'ERR_DAKTELA_APPLICATION'`, and is reported through `hasErrors()` on the `getAll()` result.
 
-Set `stopOnError: false` to skip failed pages. The run aborts after `maxConsecutiveErrors` consecutive failed pages (default `3`), rethrowing the last transport error or throwing a `DaktelaError` with `code === 'ERR_DAKTELA_APPLICATION'` for application errors, so persistent failures such as revoked credentials do not trigger hundreds of requests. `getAll()` collects application errors from every skipped page in `errors`. A zero `maxItems` value returns immediately without making a request.
+Set `stopOnError: false` to skip failed pages. The run aborts after `maxConsecutiveErrors` consecutive failed pages (default `3`), rethrowing the last transport error or throwing a `DaktelaError` with `code === 'ERR_DAKTELA_APPLICATION'` for application errors, so persistent failures such as revoked credentials do not trigger hundreds of requests. `getAll()` reports every skipped page in `errors`, so `hasErrors()` is `true` whenever the result is incomplete: application errors appear as the API returned them, and a page skipped after a request failure appears as `{message, code, status, skip, take}`. `pages()` and `iterate()` skip such pages and report each one through the configured `logger` as a warning. A zero `maxItems` value returns immediately without making a request.
 
 Pagination uses `skip`/`take` offsets. If records can be created or deleted during a long read, pass a stable `sort` (for example on `name`) to reduce duplicated or skipped records.
 
@@ -474,7 +474,10 @@ docker run --rm -v "$PWD:/app" -w /app node:22-alpine npm ci
 docker run --rm -v "$PWD:/app" -w /app node:22-alpine npm test
 docker run --rm -v "$PWD:/app" -w /app node:22-alpine npm run test:coverage
 docker run --rm -v "$PWD:/app" -w /app node:22-alpine npm run test:types
+docker run --rm -v "$PWD:/app" -w /app node:22-alpine npm run test:package
 ```
+
+`test:package` packs the module and checks that its type declarations resolve correctly for CommonJS, ES module, and bundler consumers.
 
 Live integration tests are separate because they create, update, and remove a temporary status:
 
@@ -483,7 +486,7 @@ docker run --rm --env-file .env -v "$PWD:/app" -w /app node:22-alpine \
     npm run test:integration
 ```
 
-See `.env.example` for the required variables.
+See `.env.example` for the required variables. Maintainers can also run the suite from GitHub Actions with the manual **Integration** workflow, which reads `DAKTELA_INSTANCE` and `DAKTELA_ACCESS_TOKEN` from the `integration` environment secrets. Point it at a test instance only.
 
 ## License
 
