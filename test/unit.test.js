@@ -883,6 +883,7 @@ describe('hardening', () => {
         await expect(collect(client.iterate('../tickets', {
             stopOnError: false
         }))).rejects.toThrow(TypeError);
+        expect(logger.warn).not.toHaveBeenCalled();
         await expect(client.getAll('tickets', {
             stopOnError: false,
             retry: 'always'
