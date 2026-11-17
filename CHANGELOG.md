@@ -4,6 +4,10 @@ All notable changes to this project are documented in this file. The project fol
 
 ## [Unreleased]
 
+### Security
+
+- Development tooling only: `minimatch` and `glob`, pulled in by Jest, are forced to patched major versions through `overrides` (GHSA-g3hv-75wg-m249, GHSA-3g3m-2fjr-6pw4), and the lockfile is refreshed. The published package and its runtime dependencies are unchanged.
+
 ## [1.3.2] - 2026-11-15
 
 ### Fixed
